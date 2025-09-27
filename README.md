@@ -44,28 +44,6 @@ Bônus Implementados:
 - Monitoramento com Prometheus.
 - Retries automáticos e DLQ no RabbitMQ.
 
-### Arquitetura Geral
- [ Cliente / Usuário ]
-          |
-   (upload via API)
-          ↓
-     🪺 VideoNest
-          |
-   (mensagem na fila)
-          ↓
-     RabbitMQ Broker
-          |
-          ↓
-     ⚒️ ScanForge
-          |
-   (processamento pesado)
-          ↓
-     MongoDB + Redis
-          |
-   (status, resultados, QR Codes)
-          ↓
- [ Cliente consulta resultados ]
-
 ➡️ Essa arquitetura garante desacoplamento: se o processamento falhar, o upload continua funcionando.
 ➡️ Inspirada em players reais como YouTube, Netflix e e-commerces de alta escala.
 

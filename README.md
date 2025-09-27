@@ -1,5 +1,7 @@
 # Hackathon_FIAP_7NETT
 
+Link fluxograma Macro: https://miro.com/app/board/uXjVJDhgwZw=/?share_link_id=839679897976
+
 ## Introdução
 
 Este projeto foi desenvolvido para o Hackathon FIAP 7NETT, atendendo ao desafio da Visionary Analytics: criar uma solução escalável e robusta para upload, processamento e análise de vídeos, com foco na detecção de QR Codes.

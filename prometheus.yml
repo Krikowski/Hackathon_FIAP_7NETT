@@ -1,0 +1,28 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # VideoNest API (porta 8080)
+  - job_name: 'videonest'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['videonest_service:8080']
+    scrape_interval: 30s
+  
+  # ScanForge Metrics (porta 8081)
+  - job_name: 'scanforge'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['scanforge_service:8081']
+    scrape_interval: 30s
+  
+  # RabbitMQ (bônus)
+  - job_name: 'rabbitmq'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['rabbitmq_hackathon:15692']  # Management API
+    scrape_interval: 30s
+
+rule_files:
+  - "rules/*.yml"

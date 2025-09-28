@@ -1,0 +1,287 @@
+# Docker Compose FINAL - Hackathon FIAP 7NETT
+# ✅ Nomes consistentes: rabbitmq_hackathon, mongodb_hackathon, etc.
+# ✅ Volume host: ./uploads
+# ✅ Monitoring: Prometheus + Grafana
+# ✅ Dependências resolvidas com ordem correta (VideoNest → ScanForge)
+# ✅ Healthchecks robustos
+
+services:
+  # ===== DATABASES =====
+  mongodb_hackathon:
+    image: mongo:8.0
+    container_name: mongodb_hackathon
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin
+      MONGO_INITDB_DATABASE: Hackathon_FIAP
+    volumes:
+      - mongodata:/data/db
+    healthcheck:
+      # Healthcheck robusto em 2 etapas: TCP + autenticação
+      test: |
+        bash -c '
+          if ! timeout 5s bash -c "cat < /dev/null > /dev/tcp/localhost/27017"; then
+            exit 1
+          fi
+          sleep 5
+          echo "db.adminCommand(\"ping\")" | mongosh --quiet --port 27017 --eval "db.getMongo().host='localhost:27017'" --username admin --password admin --authenticationDatabase admin || exit 1
+        '
+      interval: 15s
+      timeout: 20s
+      retries: 15
+      start_period: 45s
+    # Labels para monitoramento
+    labels:
+      prometheus.io/scrape: 'false'
+
+  redis_hackathon:
+    image: redis:7-alpine
+    container_name: redis_hackathon
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # Labels para monitoramento
+    labels:
+      prometheus.io/scrape: 'false'
+
+  # ===== MESSAGING =====
+  rabbitmq_hackathon:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq_hackathon
+    restart: unless-stopped
+    ports:
+      - "5672:5672"      # AMQP
+      - "15672:15672"    # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      # Política DLQ (bônus) - aplicada automaticamente
+      - ./rabbitmq/dlq-policy.json:/etc/rabbitmq/dlq-policy.json:ro
+    # Labels para monitoramento
+    labels:
+      prometheus.io/scrape: 'true'
+      prometheus.io/port: '15692'
+
+  # ===== MICROSSERVIÇOS (ORDEM CRÍTICA: VideoNest PRIMEIRO) =====
+  videonest_service:
+    build:
+      context: ./VideoNest/VideoNest
+      dockerfile: Dockerfile
+    image: videonest-service:latest
+    container_name: videonest_service
+    restart: unless-stopped
+    ports:
+      - "5001:8080"  # API principal
+    environment:
+      ASPNETCORE_ENVIRONMENT: Demo
+      # MongoDB
+      MongoDB__ConnectionString: mongodb://admin:admin@mongodb_hackathon:27017
+      MongoDB__DatabaseName: Hackathon_FIAP
+      # Redis
+      Redis__ConnectionString: redis_hackathon:6379
+      # RabbitMQ - CONSISTENTE
+      RabbitMQ__HostName: rabbitmq_hackathon
+      RabbitMQ__UserName: admin
+      RabbitMQ__Password: admin
+      RabbitMQ__Port: 5672
+      RabbitMQ__QueueName: video_queue
+      RabbitMQ__DeadLetterExchange: dlx_video_exchange
+      RabbitMQ__DeadLetterQueue: dlq_video_queue
+      # Storage
+      VideoStorage__BasePath: /uploads
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      # ✅ Dependências CRÍTICAS - todas devem estar healthy
+      mongodb_hackathon:
+        condition: service_healthy
+      redis_hackathon:
+        condition: service_healthy
+      rabbitmq_hackathon:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/uploads  # Volume host para arquivos de vídeo
+    labels:
+      prometheus.io/scrape: 'true'
+      prometheus.io/port: '8080'
+      description: "VideoNest API - Upload e controle de vídeos"
+    # ✅ VideoNest inicializa PRIMEIRO (declara infraestrutura RabbitMQ)
+
+  scanforge_service:
+    build:
+      context: ./ScanForge/ScanForge
+      dockerfile: Dockerfile
+    image: scanforge-service:latest
+    container_name: scanforge_service
+    restart: unless-stopped
+    ports:
+      - "5002:8080"  # Health check
+      - "8081:8081"  # Prometheus metrics
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080;http://+:8081
+      # MongoDB
+      MongoDB__ConnectionString: mongodb://admin:admin@mongodb_hackathon:27017
+      MongoDB__DatabaseName: Hackathon_FIAP
+      # RabbitMQ - CONSISTENTE
+      RabbitMQ__HostName: rabbitmq_hackathon
+      RabbitMQ__UserName: admin
+      RabbitMQ__Password: admin
+      RabbitMQ__Port: 5672
+      RabbitMQ__QueueName: video_queue
+      RabbitMQ__DeadLetterExchange: dlx_video_exchange
+      RabbitMQ__DeadLetterQueue: dlq_video_queue
+      # Storage
+      VideoStorage__BasePath: /uploads
+      FFmpeg__Path: /usr/bin
+      Optimization__DurationThreshold: 120
+      Optimization__OptimizedFps: 0.5
+      Optimization__DefaultFps: 1.0
+      # SignalR - aponta para VideoNest
+      SignalR__HubUrl: http://videonest_service:8080/videoHub
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    depends_on:
+      # ✅ Dependências: RabbitMQ + MongoDB healthy, VideoNest started
+      rabbitmq_hackathon:
+        condition: service_healthy
+      mongodb_hackathon:
+        condition: service_healthy
+      videonest_service:
+        condition: service_started  # VideoNest deve estar rodando (infraestrutura declarada)
+    volumes:
+      - ./uploads:/uploads  # Mesmo volume para processar vídeos
+    labels:
+      prometheus.io/scrape: 'true'
+      prometheus.io/port: '8081'
+      description: "ScanForge Worker - Processamento de QR Codes"
+
+  # ===== MONITORAMENTO (BÔNUS) =====
+  prometheus_hackathon:
+    image: prom/prometheus:v2.51.0
+    container_name: prometheus_hackathon
+    restart: unless-stopped
+    ports:
+      - "9090:9090"  # Prometheus UI
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      # ✅ Monitoring depende dos serviços principais estarem rodando
+      videonest_service:
+        condition: service_started
+      scanforge_service:
+        condition: service_started
+    labels:
+      prometheus.io/scrape: 'false'
+      description: "Prometheus - Monitoring System"
+
+  grafana_hackathon:
+    image: grafana/grafana:10.2.0
+    container_name: grafana_hackathon
+    restart: unless-stopped
+    ports:
+      - "3001:3000"  # Grafana UI
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_SERVER_SERVE_FROM_SUB_PATH=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana-provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      prometheus_hackathon:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      prometheus.io/scrape: 'false'
+      description: "Grafana - Dashboard System"
+
+# ===== VOLUMES PERSISTENTES =====
+volumes:
+  # Database volumes
+  mongodata:
+    driver: local
+  redis_data:
+    driver: local
+  rabbitmq_data:
+    driver: local
+  
+  # Monitoring volumes
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+# ===== REDE INTERNA =====
+networks:
+  default:
+    name: hackathon_network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ===== COMENTÁRIOS DE USO =====
+# COMANDOS ÚTEIS:
+# Iniciar tudo: docker-compose up --build
+# Ver status: docker-compose ps
+# Logs específicos: docker-compose logs -f videonest_service
+# Parar: docker-compose down
+# Limpar volumes: docker-compose down -v
+#
+# ACESSOS:
+# VideoNest API: http://localhost:5001
+# RabbitMQ UI: http://localhost:15672 (admin/admin)
+# Prometheus: http://localhost:9090
+# Grafana: http://localhost:3001 (admin/admin)
+#
+# FLOWS:
+# 1. VideoNest declara RabbitMQ infra (exchanges, queues, DLQ)
+# 2. ScanForge consome da fila já existente
+# 3. Mensagens falham → DLQ após 3 tentativas
+# 4. Monitoring coleta métricas dos dois serviços

@@ -2,6 +2,9 @@
 
 Link fluxograma Macro: https://miro.com/app/board/uXjVJDhgwZw=/?share_link_id=839679897976
 
+<img width="720" height="652" alt="Captura de tela 2025-09-27 211328" src="https://github.com/user-attachments/assets/1a564642-ceee-4080-b947-5085a3f5c859" />
+
+
 ## Introdução
 
 Este projeto foi desenvolvido para o Hackathon FIAP 7NETT, atendendo ao desafio da Visionary Analytics: criar uma solução escalável e robusta para upload, processamento e análise de vídeos, com foco na detecção de QR Codes.

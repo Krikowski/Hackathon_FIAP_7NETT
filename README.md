@@ -2,6 +2,7 @@
 
 Link fluxograma Macro: https://miro.com/app/board/uXjVJDhgwZw=/?share_link_id=839679897976
 
+Imagem ilustrativa dos serviços utilizados
 <img width="720" height="652" alt="Captura de tela 2025-09-27 211328" src="https://github.com/user-attachments/assets/1a564642-ceee-4080-b947-5085a3f5c859" />
 
 
